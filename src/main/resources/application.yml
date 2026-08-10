@@ -1,0 +1,95 @@
+server:
+  port: 9099
+
+spring:
+  datasource:
+    url: jdbc:h2:file:./data/shipmate;MODE=PostgreSQL
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+
+shipmate:
+  github:
+    api-url: https://api.github.com
+    owner: Mojojojo0222
+    token: ${GITHUB_TOKEN:}
+    webhook-secret: ${WEBHOOK_SECRET:changeme}
+    ci-workflow: shipmate-deploy.yml
+    branch: main
+    app-id: ${GITHUB_APP_ID:}
+    installation-id: ${GITHUB_INSTALLATION_ID:}
+    private-key: ${GITHUB_APP_PRIVATE_KEY:}
+    poll-enabled: ${SHIPMATE_POLL_ENABLED:false}
+    poll-interval-sec: 30
+  gitops:
+    manifests-path: shipmate
+    branch: main
+  k8s:
+    namespace-prefix: shipmate
+  pipeline:
+    ci-timeout-min: 15
+    deploy-timeout-min: 8
+    health-retries: 6
+    health-interval-sec: 10
+    rollback-enabled: true
+    max-rollbacks: 1
+  monitor:
+    interval-sec: 60
+    restart-after-failures: 3
+  aws:
+    region: ap-south-1
+    ecr-repository-prefix: shipmate
+    github-actions-role-arn: ${GITHUB_ACTIONS_ROLE_ARN:}
+  pricing:
+    region: ap-south-1
+    buffer: 1.2
+    storage-per-gib: 0.08
+    instances:
+      - name: t3.small
+        vcpu: 2
+        memory-gib: 2
+        price-monthly: 22.4
+      - name: t3.medium
+        vcpu: 2
+        memory-gib: 4
+        price-monthly: 44.6
+      - name: t3.large
+        vcpu: 2
+        memory-gib: 8
+        price-monthly: 89.2
+      - name: m5.large
+        vcpu: 2
+        memory-gib: 8
+        price-monthly: 91.4
+      - name: m5.xlarge
+        vcpu: 4
+        memory-gib: 16
+        price-monthly: 182.9
+    databases:
+      - name: postgres-t3-small
+        max-write-rpm: 500
+        storage-gib: 20
+        price-monthly: 28.8
+      - name: postgres-t3-medium
+        max-write-rpm: 1500
+        storage-gib: 50
+        price-monthly: 57.6
+      - name: postgres-m5-large
+        max-write-rpm: 5000
+        storage-gib: 200
+        price-monthly: 173.0
+    overhead:
+      control-plane: 72.0
+      nat-gateway: 32.0
+      load-balancer: 18.0
+      registry: 1.5

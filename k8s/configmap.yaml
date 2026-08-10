@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shipmate-config
+  namespace: shipmate
+data:
+  SHIPMATE_GITHUB_OWNER: "Mojojojo0222"
+  SHIPMATE_GITHUB_BRANCH: "main"
+  SHIPMATE_GITHUB_CI_WORKFLOW: "shipmate-deploy.yml"
+  SHIPMATE_GITOPS_MANIFESTS_PATH: "shipmate"
+  SHIPMATE_K8S_NAMESPACE_PREFIX: "shipmate"
+  SHIPMATE_AWS_REGION: "ap-south-1"
+  SHIPMATE_AWS_ECR_REPOSITORY_PREFIX: "shipmate"

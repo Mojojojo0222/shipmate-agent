@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shipmate — Cloud Agent</title>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#e6edf3;
+    --dim:#8b949e; --green:#3fb950; --red:#f85149; --yellow:#d29922; --blue:#58a6ff;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:"Segoe UI",system-ui,sans-serif; padding:24px; }
+  h1 { font-size:22px; letter-spacing:0.5px; }
+  h1 span { color:var(--blue); }
+  .sub { color:var(--dim); font-size:13px; margin-top:4px; }
+  nav { margin:18px 0 24px; display:flex; gap:10px; }
+  nav button {
+    background:var(--panel); color:var(--text); border:1px solid var(--border);
+    padding:8px 18px; border-radius:6px; cursor:pointer; font-size:14px;
+  }
+  nav button.active { border-color:var(--blue); color:var(--blue); }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:18px; margin-bottom:18px; }
+  label { display:block; color:var(--dim); font-size:12px; margin:10px 0 4px; }
+  input, select {
+    width:100%; background:#0d1117; border:1px solid var(--border); color:var(--text);
+    padding:9px 12px; border-radius:6px; font-size:14px;
+  }
+  button.primary {
+    background:var(--blue); color:#0d1117; border:none; padding:10px 22px;
+    border-radius:6px; font-weight:600; cursor:pointer; font-size:14px; margin-top:14px;
+  }
+  button.primary:disabled { opacity:0.5; cursor:not-allowed; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:var(--dim); font-weight:500; padding:8px; border-bottom:1px solid var(--border); }
+  td { padding:8px; border-bottom:1px solid #21262d; vertical-align:top; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:10px; font-size:12px; font-weight:600; }
+  .b-green { background:#123b1c; color:var(--green); }
+  .b-red { background:#3b1414; color:var(--red); }
+  .b-yellow { background:#3b2f0a; color:var(--yellow); }
+  .b-blue { background:#10233f; color:var(--blue); }
+  .b-dim { background:#1f242b; color:var(--dim); }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:14px; }
+  .card .num { font-size:26px; font-weight:700; margin-top:4px; }
+  .card .lbl { color:var(--dim); font-size:12px; }
+  .url { color:var(--green); text-decoration:none; word-break:break-all; }
+  .mono { font-family:Consolas,monospace; font-size:12px; }
+  .alert-item { border-left:3px solid var(--yellow); padding:8px 12px; margin-bottom:8px; background:#0d1117; border-radius:0 6px 6px 0; font-size:13px; }
+  .alert-item.red { border-left-color:var(--red); }
+  .alert-item.green { border-left-color:var(--green); }
+  .flex { display:flex; gap:14px; flex-wrap:wrap; }
+  .grow { flex:1; min-width:280px; }
+  #log { font-family:Consolas,monospace; font-size:12px; white-space:pre-wrap; color:var(--dim); max-height:200px; overflow:auto; }
+  .hidden { display:none; }
+  .state { font-size:12px; color:var(--dim); margin-top:8px; min-height:18px; }
+  a { color:var(--blue); }
+</style>
+</head>
+<body>
+<h1>⚓ Shipmate <span>Cloud Agent</span></h1>
+<div class="sub">Paste a repo. Estimate cost. Deploy to EKS. It watches, verifies, and heals itself.</div>
+
+<nav>
+  <button id="tab-wizard" class="active" onclick="show('wizard')">Wizard</button>
+  <button id="tab-ops" onclick="show('ops')">Ops Dashboard</button>
+</nav>
+
+<!-- WIZARD -->
+<div id="view-wizard">
+  <div class="panel">
+    <label>GitHub repository URL</label>
+    <input id="repo-url" placeholder="https://github.com/you/todo-list" value="">
+    <div class="flex">
+      <div class="grow">
+        <label>Expected traffic (requests per minute)</label>
+        <input id="rpm" type="number" value="500" min="1">
+      </div>
+      <div class="grow">
+        <label>Expected users</label>
+        <input id="users" type="number" value="5000" min="1">
+      </div>
+    </div>
+    <button class="primary" id="btn-estimate" onclick="registerAndEstimate()">Validate &amp; Estimate cost</button>
+    <div class="state" id="wizard-state"></div>
+  </div>
+
+  <div id="estimate-panel" class="panel hidden">
+    <h2 style="font-size:16px; margin-bottom:12px;">Cost estimate <span style="color:var(--dim); font-weight:400; font-size:13px;">— what is used &amp; why</span></h2>
+    <div id="breakdown"></div>
+    <div id="spec-block" class="mono" style="background:#0d1117; border:1px solid var(--border); padding:12px; border-radius:6px; margin-top:12px; white-space:pre-wrap; max-height:200px; overflow:auto;"></div>
+    <button class="primary" id="btn-deploy" onclick="deploy()">Deploy to EKS</button>
+    <div class="state" id="deploy-state"></div>
+  </div>
+</div>
+
+<!-- OPS DASHBOARD -->
+<div id="view-ops" class="hidden">
+  <div class="cards" style="margin-bottom:18px;">
+    <div class="card"><div class="lbl">Managed apps</div><div class="num" id="s-apps">-</div></div>
+    <div class="card"><div class="lbl">Healthy</div><div class="num" id="s-healthy" style="color:var(--green)">-</div></div>
+    <div class="card"><div class="lbl">Degraded / failed</div><div class="num" id="s-degraded" style="color:var(--red)">-</div></div>
+    <div class="card"><div class="lbl">Rollbacks</div><div class="num" id="s-rollbacks">-</div></div>
+    <div class="card"><div class="lbl">Est. monthly cost</div><div class="num" id="s-cost">-</div></div>
+  </div>
+
+  <div class="panel">
+    <h2 style="font-size:16px; margin-bottom:10px;">Apps</h2>
+    <table>
+      <thead><tr><th>App</th><th>Status</th><th>URL</th><th>Traffic</th><th>Est. $/mo</th><th>Last image</th><th></th></tr></thead>
+      <tbody id="apps-body"></tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2 style="font-size:16px; margin-bottom:10px;">Deployment runs</h2>
+    <table>
+      <thead><tr><th>Run</th><th>App</th><th>Trigger</th><th>Commit</th><th>State</th><th>CI URL</th><th>Error</th></tr></thead>
+      <tbody id="runs-body"></tbody>
+    </table>
+  </div>
+
+  <div class="flex">
+    <div class="grow panel">
+      <h2 style="font-size:16px; margin-bottom:10px;">Alerts</h2>
+      <div id="alerts"></div>
+    </div>
+    <div class="grow panel">
+      <h2 style="font-size:16px; margin-bottom:10px;">Health (latest checks)</h2>
+      <div id="health"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2 style="font-size:16px; margin-bottom:10px;">Audit log</h2>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function show(view) {
+  document.querySelectorAll('#tab-wizard,#tab-ops').forEach(b => b.classList.remove('active'));
+  $('tab-' + view).classList.add('active');
+  $('view-wizard').classList.toggle('hidden', view !== 'wizard');
+  $('view-ops').classList.toggle('hidden', view !== 'ops');
+  if (view === 'ops') refreshOps();
+}
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(t.replace(/^.*?: /,'').slice(0, 200));
+  }
+  return r.json();
+}
+
+let currentApp = null;
+
+async function registerAndEstimate() {
+  const url = $('repo-url').value.trim();
+  $('wizard-state').textContent = '';
+  $('btn-estimate').disabled = true;
+  try {
+    $('wizard-state').textContent = 'Validating repo, checking Dockerfile...';
+    const app = await api('/api/apps', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        repoUrl: url,
+        trafficRpm: parseInt($('rpm').value) || 500,
+        trafficUsers: parseInt($('users').value) || 5000
+      })
+    });
+    currentApp = app;
+    $('wizard-state').textContent = 'Repo valid ✓ — computing cost estimate...';
+    const est = await api('/api/apps/' + app.id + '/estimate', {method: 'POST'});
+    currentApp = est.app;
+    $('estimate-panel').classList.remove('hidden');
+    renderBreakdown(est.breakdown, est.totalMonthly);
+    $('spec-block').textContent = est.specYaml;
+    $('wizard-state').textContent = '';
+    $('deploy-state').textContent = '';
+  } catch (e) {
+    $('wizard-state').textContent = '❌ ' + e.message;
+  } finally {
+    $('btn-estimate').disabled = false;
+  }
+}
+
+function renderBreakdown(items, total) {
+  let html = '<table><thead><tr><th>Item</th><th>Why</th><th style="text-align:right">$/mo</th></tr></thead><tbody>';
+  for (const it of items) {
+    const bold = it.name === 'TOTAL';
+    html += `<tr style="${bold ? 'font-weight:700;color:var(--blue)' : ''}">
+      <td>${it.name}</td><td style="color:var(--dim)">${it.detail}</td>
+      <td style="text-align:right">$${it.monthly.toFixed(2)}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  $('breakdown').innerHTML = html;
+}
+
+async function deploy() {
+  $('btn-deploy').disabled = true;
+  $('deploy-state').textContent = 'Writing helm chart, ArgoCD app + CI workflow to repo, then deploying...';
+  try {
+    const run = await api('/api/apps/' + currentApp.id + '/deploy', {method: 'POST'});
+    $('deploy-state').textContent = 'Deploy started — run #' + run.id + '. Watch it in the Ops Dashboard.';
+    setTimeout(() => show('ops'), 2500);
+  } catch (e) {
+    $('deploy-state').textContent = '❌ ' + e.message;
+  } finally {
+    $('btn-deploy').disabled = false;
+  }
+}
+
+const stateBadge = s => {
+  const map = {HEALTHY:'b-green', ROLLED_BACK:'b-yellow', CI_FAILED:'b-red', FAILED:'b-red', UNHEALTHY:'b-red', ROLLING_BACK:'b-yellow', DEPLOYING:'b-blue', CI_RUNNING:'b-blue', TRIGGERING:'b-blue', VERIFYING:'b-blue', PENDING:'b-dim', SKIPPED:'b-dim'};
+  return `<span class="badge ${map[s] || 'b-dim'}">${s}</span>`;
+};
+const appBadge = s => {
+  const map = {RUNNING:'b-green', HEALTHY:'b-green', DEGRADED:'b-yellow', FAILED:'b-red', DEPLOYING:'b-blue', ESTIMATED:'b-blue', DRAFT:'b-dim', PAUSED:'b-dim'};
+  return `<span class="badge ${map[s] || 'b-dim'}">${s}</span>`;
+};
+
+async function refreshOps() {
+  try {
+    const [apps, runs, alerts, health, audit] = await Promise.all([
+      api('/api/apps'), api('/api/runs'), api('/api/alerts'),
+      api('/api/health/latest'), api('/api/audit')
+    ]);
+
+    const active = apps.filter(a => a.status !== 'DRAFT' && a.status !== 'PAUSED');
+    $('s-apps').textContent = active.length;
+    $('s-healthy').textContent = active.filter(a => a.status === 'RUNNING').length;
+    $('s-degraded').textContent = active.filter(a => a.status === 'DEGRADED' || a.status === 'FAILED').length;
+    $('s-rollbacks').textContent = runs.filter(r => r.state === 'ROLLED_BACK').length;
+    $('s-cost').textContent = '$' + apps.reduce((s, a) => s + (a.estimatedMonthlyCost || 0), 0).toFixed(0);
+
+    $('apps-body').innerHTML = apps.map(a => `
+      <tr>
+        <td><b>${a.name}</b><br><span class="mono" style="color:var(--dim)">${a.repoOwner}/${a.repoName}</span></td>
+        <td>${appBadge(a.status)}</td>
+        <td>${a.deployedUrl ? `<a class="url" href="${a.deployedUrl}" target="_blank">${a.deployedUrl}</a>` : '<span style="color:var(--dim)">—</span>'}</td>
+        <td>${a.trafficRpm} RPM / ${a.trafficUsers} users</td>
+        <td>$${(a.estimatedMonthlyCost || 0).toFixed(0)}</td>
+        <td class="mono" style="color:var(--dim)">${(a.lastImageTag || '—').slice(0,10)}</td>
+        <td><a href="#" onclick="triggerDeploy(${a.id});return false;" style="font-size:12px">redeploy</a></td>
+      </tr>`).join('');
+
+    $('runs-body').innerHTML = runs.map(r => `
+      <tr>
+        <td>#${r.id}</td>
+        <td>${r.appName}</td>
+        <td>${r.trigger}</td>
+        <td class="mono">${(r.commitMessage || '').slice(0,40)}<br><span style="color:var(--dim)">${(r.commitSha||'').slice(0,10)}</span></td>
+        <td>${stateBadge(r.state)}</td>
+        <td>${r.workflowRunUrl ? `<a href="${r.workflowRunUrl}" target="_blank" style="font-size:12px">CI</a>` : '<span style="color:var(--dim)">—</span>'}</td>
+        <td style="color:var(--red); font-size:12px">${r.error || ''}</td>
+      </tr>`).join('');
+
+    $('alerts').innerHTML = alerts.map(a => `
+      <div class="alert-item ${a.type === 'SCALE' ? '' : a.type === 'RECOVERED' ? 'green' : 'red'}">
+        <b style="color:var(--dim)">${a.type}</b> — ${a.message}
+        <span style="color:var(--dim); font-size:11px; display:block">${new Date(a.createdAt).toLocaleString()}</span>
+      </div>`).join('') || '<div style="color:var(--dim)">No alerts yet</div>';
+
+    $('health').innerHTML = health.slice(0,15).map(h => `
+      <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid #21262d; font-size:12px;">
+        <span><b>${h.appName}</b> <span class="badge ${h.status === 'UP' ? 'b-green' : 'b-red'}">${h.status}</span></span>
+        <span style="color:var(--dim)">${h.httpStatus || 'timeout'} · ${h.latencyMs}ms · ${new Date(h.checkedAt).toLocaleTimeString()}</span>
+      </div>`).join('');
+
+    $('log').textContent = audit.map(a =>
+      `[${new Date(a.createdAt).toLocaleTimeString()}] ${a.actor.padEnd(8)} ${a.action.padEnd(16)} ${a.detail}`).join('\n');
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function triggerDeploy(id) {
+  await api('/api/apps/' + id + '/trigger', {method: 'POST'});
+  setTimeout(refreshOps, 2000);
+}
+
+setInterval(() => { if (!$('view-ops').classList.contains('hidden')) refreshOps(); }, 10000);
+refreshOps();
+</script>
+</body>
+</html>

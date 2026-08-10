@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shipmate
+  namespace: shipmate
+  labels:
+    app: shipmate
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shipmate
+  template:
+    metadata:
+      labels:
+        app: shipmate
+    spec:
+      serviceAccountName: shipmate
+      containers:
+        - name: shipmate
+          image: 083777493383.dkr.ecr.ap-south-1.amazonaws.com/shipmate:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 9099
+          envFrom:
+            - configMapRef:
+                name: shipmate-config
+            - secretRef:
+                name: shipmate-secrets
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:h2:file:/data/shipmate;MODE=PostgreSQL"
+            - name: SHIPMATE_GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: shipmate-secrets
+                  key: GITHUB_TOKEN
+            - name: SHIPMATE_GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: shipmate-secrets
+                  key: WEBHOOK_SECRET
+            - name: SHIPMATE_AWS_GITHUB_ACTIONS_ROLE_ARN
+              valueFrom:
+                secretKeyRef:
+                  name: shipmate-secrets
+                  key: GITHUB_ACTIONS_ROLE_ARN
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 9099
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 9099
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: shipmate-data
