@@ -114,7 +114,7 @@ when a commit lands instead of an explicit API call; bot commits (`shipmate:`, `
 git clone https://github.com/Mojojojo0222/shipmate-agent.git
 cd shipmate-agent
 
-export GITHUB_TOKEN=ghp_...                 # repo + actions scopes
+export GITHUB_TOKEN="YOUR_FINE_GRAINED_PAT"   # repo + actions scopes
 export WEBHOOK_SECRET=$(openssl rand -hex 20)
 # optional overrides
 # export SHIPMATE_SERVICE_TYPE=NodePort      # no LoadBalancer needed (kind / local)
