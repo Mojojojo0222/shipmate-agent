@@ -30,6 +30,7 @@ public class App {
     private String valuesPath;
     private String namespace;
     private String healthUrl;
+    private String dbEngine = "postgres";
     private int containerPort = 8080;
 
     private int trafficRpm;
@@ -72,6 +73,8 @@ public class App {
     public void setNamespace(String namespace) { this.namespace = namespace; }
     public String getHealthUrl() { return healthUrl; }
     public void setHealthUrl(String healthUrl) { this.healthUrl = healthUrl; }
+    public String getDbEngine() { return dbEngine; }
+    public void setDbEngine(String dbEngine) { this.dbEngine = dbEngine; }
     public int getContainerPort() { return containerPort; }
     public void setContainerPort(int containerPort) { this.containerPort = containerPort; }
     public int getTrafficRpm() { return trafficRpm; }

@@ -91,15 +91,7 @@ public class GitHubAuth {
 
     private String createJwt() {
         try {
-            String pem = loadPem();
-            String base64 = pem
-                    .replace("-----BEGIN PRIVATE KEY-----", "")
-                    .replace("-----END PRIVATE KEY-----", "")
-                    .replaceAll("\\s", "");
-            byte[] der = Base64.getDecoder().decode(base64);
-            PrivateKey key = KeyFactory.getInstance("RSA")
-                    .generatePrivate(new PKCS8EncodedKeySpec(der));
-
+            PrivateKey key = parsePrivateKey();
             long now = Instant.now().getEpochSecond();
             String header = base64url("{\"alg\":\"RS256\",\"typ\":\"JWT\"}");
             String payload = base64url("{\"iat\":" + now + ",\"exp\":" + (now + 540)
@@ -112,6 +104,26 @@ public class GitHubAuth {
         } catch (Exception e) {
             throw new IllegalStateException("cannot sign GitHub App JWT: " + e.getMessage(), e);
         }
+    }
+
+    private PrivateKey parsePrivateKey() throws Exception {
+        String pem = loadPem();
+        java.security.KeyPair kp;
+        try (java.io.StringReader reader = new java.io.StringReader(pem);
+             org.bouncycastle.openssl.PEMParser parser = new org.bouncycastle.openssl.PEMParser(reader)) {
+            Object obj = parser.readObject();
+            org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter converter =
+                    new org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter();
+            if (obj instanceof org.bouncycastle.openssl.PEMKeyPair) {
+                kp = converter.getKeyPair((org.bouncycastle.openssl.PEMKeyPair) obj);
+            } else if (obj instanceof org.bouncycastle.asn1.pkcs.PrivateKeyInfo) {
+                kp = new java.security.KeyPair(null,
+                        converter.getPrivateKey((org.bouncycastle.asn1.pkcs.PrivateKeyInfo) obj));
+            } else {
+                throw new IllegalStateException("unsupported PEM object: " + obj);
+            }
+        }
+        return kp.getPrivate();
     }
 
     private String loadPem() throws Exception {

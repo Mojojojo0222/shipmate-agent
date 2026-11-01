@@ -1,5 +1,6 @@
 package com.shipmate.service;
 
+import com.shipmate.k8s.K8sService;
 import com.shipmate.model.App;
 import com.shipmate.model.HealthRecord;
 import com.shipmate.repository.HealthRecordRepository;
@@ -18,13 +19,17 @@ import java.time.Duration;
 public class HealthService {
 
     private static final Logger log = LoggerFactory.getLogger(HealthService.class);
+    private static final String DEFAULT_HEALTH_PATH = "/actuator/health";
+
     private final HealthRecordRepository healthRepo;
+    private final K8sService k8s;
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
-    public HealthService(HealthRecordRepository healthRepo) {
+    public HealthService(HealthRecordRepository healthRepo, K8sService k8s) {
         this.healthRepo = healthRepo;
+        this.k8s = k8s;
     }
 
     public static class HealthResult {
@@ -45,18 +50,38 @@ public class HealthService {
 
     public HealthResult checkNow(App app) {
         long start = System.currentTimeMillis();
+        String path = DEFAULT_HEALTH_PATH;
         try {
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(app.getHealthUrl()))
-                    .timeout(Duration.ofSeconds(10))
-                    .GET()
-                    .build();
-            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-            long latency = System.currentTimeMillis() - start;
-            boolean up = resp.statusCode() >= 200 && resp.statusCode() < 500;
-            record(app, up ? "UP" : "DOWN", resp.statusCode(), latency);
-            return new HealthResult(up, resp.statusCode(), latency);
-        } catch (IOException | InterruptedException e) {
+            URI uri = URI.create(app.getHealthUrl());
+            if (uri.getPath() != null && !uri.getPath().isEmpty() && !"/".equals(uri.getPath())) {
+                path = uri.getPath();
+            }
+        } catch (Exception ignore) {
+        }
+        try {
+            String podName = k8s.findReadyPod(app.getNamespace(), app.getName());
+            if (podName == null) {
+                record(app, "DOWN", 0, System.currentTimeMillis() - start);
+                return new HealthResult(false, 0, System.currentTimeMillis() - start);
+            }
+            int containerPort = k8s.getContainerPort(app.getNamespace(), podName);
+            try (com.shipmate.k8s.K8sService.PortForwardInfo pf = k8s.portForwardPod(app.getNamespace(), podName, containerPort)) {
+                if (pf == null) {
+                    record(app, "DOWN", 0, System.currentTimeMillis() - start);
+                    return new HealthResult(false, 0, System.currentTimeMillis() - start);
+                }
+                HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create("http://127.0.0.1:" + pf.localPort() + path))
+                        .timeout(Duration.ofSeconds(10))
+                        .GET()
+                        .build();
+                HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+                long latency = System.currentTimeMillis() - start;
+                boolean up = resp.statusCode() >= 200 && resp.statusCode() < 500;
+                record(app, up ? "UP" : "DOWN", resp.statusCode(), latency);
+                return new HealthResult(up, resp.statusCode(), latency);
+            }
+        } catch (IOException | InterruptedException | RuntimeException e) {
             long latency = System.currentTimeMillis() - start;
             record(app, "DOWN", 0, latency);
             return new HealthResult(false, 0, latency);

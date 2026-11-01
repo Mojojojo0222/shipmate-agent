@@ -47,6 +47,13 @@ public class CommitPoller {
                 List<GitHubClient.CommitInfo> commits = gitHub.listCommits(
                         app.getRepoOwner(), app.getRepoName(), app.getBranch(), 10);
 
+                if (app.getPolledSha() == null) {
+                    app.setPolledSha(commits.isEmpty() ? "" : commits.get(0).sha());
+                    appRepo.save(app);
+                    log.info("poller: app {} anchored at {} (initial sync, no deploys)", app.getName(), app.getPolledSha());
+                    continue;
+                }
+
                 List<GitHubClient.CommitInfo> newCommits = new ArrayList<>();
                 for (GitHubClient.CommitInfo c : commits) {
                     if (c.sha().equals(app.getPolledSha())) {

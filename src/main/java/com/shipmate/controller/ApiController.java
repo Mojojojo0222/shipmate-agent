@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -54,6 +55,11 @@ public class ApiController {
     @GetMapping("/apps/{id}")
     public Object app(@PathVariable Long id) {
         return appService.get(id);
+    }
+
+    @PutMapping("/apps/{id}")
+    public Object update(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        return appService.update(id, body);
     }
 
     @PostMapping("/apps/{id}/estimate")

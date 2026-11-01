@@ -16,9 +16,17 @@ public class ManifestGenerator {
         this.props = props;
     }
 
+    private String imageRepository(App app) {
+        return props.getRegistry().getUrl() + "/" + props.getRegistry().getOwner().toLowerCase() + "/" + app.getName();
+    }
+
     public Map<String, String> generateHelmChart(App app, CostEstimator.Sizing sizing) {
         Map<String, String> files = new LinkedHashMap<>();
         String base = props.getGitops().getManifestsPath() + "/" + app.getName() + "/helm";
+        boolean mysql = "mysql".equals(app.getDbEngine());
+        int dbPort = mysql ? 3306 : 5432;
+        String dbImage = mysql ? "mysql:8.4" : "postgres:16-alpine";
+        String dbDir = mysql ? "/var/lib/mysql" : "/var/lib/postgresql/data";
 
         files.put(base + "/Chart.yaml", """
                 apiVersion: v2
@@ -39,6 +47,7 @@ public class ManifestGenerator {
                   namespace: %s
                   replicas: %d
                   port: %d
+                  serviceType: %s
                   healthPath: /actuator/health
                   resources:
                     requests:
@@ -52,18 +61,27 @@ public class ManifestGenerator {
                     minReplicas: %d
                     maxReplicas: %d
                     cpuTarget: 60
+
+                db:
+                  engine: %s
+                  storage: %dGi
+                  port: %d
                 """.formatted(
-                props.getAws().getEcrRepositoryPrefix() + "/" + app.getName(),
+                imageRepository(app),
                 app.getName(),
                 app.getNamespace(),
                 sizing.replicas,
                 app.getContainerPort(),
-                sizing.vcpu * 100,
+                props.getK8s().getServiceType(),
+                Math.max(500, sizing.vcpu * 500),
                 sizing.memoryGiB * 1024,
-                sizing.vcpu * 200,
+                Math.max(1000, sizing.vcpu * 1000),
                 sizing.memoryGiB * 1536,
                 sizing.replicas,
-                sizing.maxReplicas));
+                sizing.maxReplicas,
+                mysql ? "mysql" : "postgres",
+                sizing.dbStorageGiB,
+                dbPort));
 
         files.put(base + "/templates/deployment.yaml", """
                 apiVersion: apps/v1
@@ -93,14 +111,31 @@ public class ManifestGenerator {
                             httpGet:
                               path: {{ .Values.app.healthPath }}
                               port: {{ .Values.app.port }}
-                            initialDelaySeconds: 10
+                            initialDelaySeconds: 150
                             periodSeconds: 10
+                            timeoutSeconds: 3
+                            failureThreshold: 5
                           livenessProbe:
                             httpGet:
                               path: {{ .Values.app.healthPath }}
                               port: {{ .Values.app.port }}
-                            initialDelaySeconds: 30
+                            initialDelaySeconds: 300
                             periodSeconds: 15
+                            timeoutSeconds: 3
+                            failureThreshold: 5
+                          env:
+                            - name: PORT
+                              value: "{{ .Values.app.port }}"
+                            - name: DB_HOST
+                              value: {{ .Values.app.name }}-db
+                            - name: DB_PORT
+                              value: "{{ .Values.db.port }}"
+                            - name: DB_NAME
+                              value: app
+                            - name: DB_USER
+                              value: app
+                            - name: DB_PASS
+                              value: app
                           resources:
                             requests:
                               cpu: {{ .Values.app.resources.requests.cpu }}
@@ -119,7 +154,7 @@ public class ManifestGenerator {
                   labels:
                     app: {{ .Values.app.name }}
                 spec:
-                  type: LoadBalancer
+                  type: {{ .Values.app.serviceType }}
                   selector:
                     app: {{ .Values.app.name }}
                   ports:
@@ -156,7 +191,7 @@ public class ManifestGenerator {
                   name: {{ .Values.app.namespace }}
                 """);
 
-        files.put(base + "/templates/postgres.yaml", """
+        files.put(base + "/templates/database.yaml", """
                 apiVersion: v1
                 kind: Service
                 metadata:
@@ -166,8 +201,8 @@ public class ManifestGenerator {
                   selector:
                     app: {{ .Values.app.name }}-db
                   ports:
-                    - port: 5432
-                      targetPort: 5432
+                    - port: {{ .Values.db.port }}
+                      targetPort: {{ .Values.db.port }}
                 ---
                 apiVersion: apps/v1
                 kind: StatefulSet
@@ -186,20 +221,14 @@ public class ManifestGenerator {
                         app: {{ .Values.app.name }}-db
                     spec:
                       containers:
-                        - name: postgres
-                          image: postgres:16-alpine
+                        - name: %s
+                          image: %s
                           env:
-                            - name: POSTGRES_USER
-                              value: app
-                            - name: POSTGRES_PASSWORD
-                              value: app
-                            - name: POSTGRES_DB
-                              value: app
-                          ports:
-                            - containerPort: 5432
+                %s          ports:
+                            - containerPort: {{ .Values.db.port }}
                           volumeMounts:
                             - name: data
-                              mountPath: /var/lib/postgresql/data
+                              mountPath: %s
                   volumeClaimTemplates:
                     - metadata:
                         name: data
@@ -208,24 +237,36 @@ public class ManifestGenerator {
                         resources:
                           requests:
                             storage: {{ .Values.db.storage }}
-                """);
-
-        files.put(base + "/templates/_helpers.tpl", """
-                {{- define "db.storage" -}}
-                {{- .Values.db.storage | default "20Gi" -}}
-                {{- end -}}
-                """);
+                """.formatted(mysql ? "mysql" : "postgres", dbImage, dbEnvBlock(mysql), dbDir));
 
         return files;
     }
 
     public Map<String, String> generateHelmChartWithDb(App app, CostEstimator.Sizing sizing) {
-        Map<String, String> files = generateHelmChart(app, sizing);
-        String base = props.getGitops().getManifestsPath() + "/" + app.getName() + "/helm";
-        String values = files.get(base + "/values.yaml");
-        values = values.replace("hpa:\n", "db:\n  storage: %dGi\n  enabled: true\nhpa:\n".formatted(sizing.dbStorageGiB));
-        files.put(base + "/values.yaml", values);
-        return files;
+        return generateHelmChart(app, sizing);
+    }
+
+    private String dbEnvBlock(boolean mysql) {
+        if (mysql) {
+            return """
+            - name: MYSQL_ROOT_PASSWORD
+              value: root
+            - name: MYSQL_DATABASE
+              value: app
+            - name: MYSQL_USER
+              value: app
+            - name: MYSQL_PASSWORD
+              value: app
+""";
+        }
+        return """
+            - name: POSTGRES_USER
+              value: app
+            - name: POSTGRES_PASSWORD
+              value: app
+            - name: POSTGRES_DB
+              value: app
+""";
     }
 
     public String generateArgoApp(App app) {
@@ -251,12 +292,81 @@ public class ManifestGenerator {
                       selfHeal: true
                     syncOptions:
                       - CreateNamespace=true
+                  ignoreDifferences:
+                    - group: apps
+                      kind: Deployment
+                      jsonPointers:
+                        - /spec/replicas
                 """.formatted(app.getName(), app.getRepoUrl(), base, app.getNamespace());
     }
 
     public String generateCiWorkflow(App app) {
         String chartPath = props.getGitops().getManifestsPath() + "/" + app.getName() + "/helm/values.yaml";
-        String ecrRepo = props.getAws().getEcrRepositoryPrefix() + "-" + app.getName();
+        String image = imageRepository(app);
+        if ("ecr".equalsIgnoreCase(props.getRegistry().getType())) {
+            return generateEcrWorkflow(app, chartPath, image);
+        }
+        return generateGhcrWorkflow(app, chartPath, image);
+    }
+
+    private String generateGhcrWorkflow(App app, String chartPath, String image) {
+        return """
+                name: shipmate-deploy
+
+                on:
+                  workflow_dispatch:
+
+                env:
+                  CHART_VALUES: %s
+
+                jobs:
+                  build-and-push:
+                    runs-on: ubuntu-latest
+                    permissions:
+                      contents: write
+                      packages: write
+                    steps:
+                      - name: Checkout
+                        uses: actions/checkout@v4
+                        with:
+                          fetch-depth: 0
+                      - name: Login to GHCR
+                        uses: docker/login-action@v3
+                        with:
+                          registry: %s
+                          username: ${{ github.actor }}
+                          password: ${{ secrets.GITHUB_TOKEN }}
+                      - name: Build and push image
+                        env:
+                          IMAGE_TAG: ${{ github.sha }}
+                        run: |
+                          docker build -t %s:$IMAGE_TAG .
+                          docker push %s:$IMAGE_TAG
+                      - name: Bump chart tag
+                        env:
+                          IMAGE_TAG: ${{ github.sha }}
+                        run: |
+                          if grep -q '^  tag:' "$CHART_VALUES"; then
+                            sed -i "s|^  tag:.*|  tag: $IMAGE_TAG|" "$CHART_VALUES"
+                          else
+                            sed -i "s|^  pullPolicy: Always|  pullPolicy: Always\\n  tag: $IMAGE_TAG|" "$CHART_VALUES"
+                          fi
+                          git config user.name "shipmate-bot"
+                          git config user.email "shipmate@users.noreply.github.com"
+                          git add "$CHART_VALUES"
+                          git commit -m "chore: shipmate bump tag to $IMAGE_TAG [skip ci]"
+                          for i in 1 2 3; do
+                            if git push origin HEAD:${{ github.ref_name }}; then
+                              exit 0
+                            fi
+                            git fetch origin ${{ github.ref_name }}
+                            git rebase origin/${{ github.ref_name }}
+                          done
+                          git push origin HEAD:${{ github.ref_name }}
+                """.formatted(chartPath, props.getRegistry().getUrl(), image, image);
+    }
+
+    private String generateEcrWorkflow(App app, String chartPath, String image) {
         String roleArn = props.getAws().getGithubActionsRoleArn();
         return """
                 name: shipmate-deploy
@@ -307,7 +417,15 @@ public class ManifestGenerator {
                           git config user.email "shipmate@users.noreply.github.com"
                           git add "$CHART_VALUES"
                           git commit -m "chore: shipmate bump tag to $IMAGE_TAG [skip ci]"
+                          for i in 1 2 3; do
+                            if git push origin HEAD:${{ github.ref_name }}; then
+                              exit 0
+                            fi
+                            git fetch origin ${{ github.ref_name }}
+                            git rebase origin/${{ github.ref_name }}
+                          done
                           git push origin HEAD:${{ github.ref_name }}
-                """.formatted(props.getAws().getRegion(), ecrRepo, chartPath, roleArn);
+                """.formatted(props.getAws().getRegion(), props.getAws().getEcrRepositoryPrefix() + "-" + app.getName(),
+                chartPath, roleArn);
     }
 }

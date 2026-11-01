@@ -45,8 +45,8 @@ public class CostEstimator {
 
     public Sizing computeSizing(int rpm) {
         int vcpu = Math.max(1, (int) Math.ceil(rpm / 200.0));
-        int memoryGiB = Math.max(2, vcpu * 2);
-        int replicas = Math.max(2, (int) Math.ceil(vcpu / 2.0));
+        int memoryGiB = Math.max(1, vcpu);
+        int replicas = Math.max(1, (int) Math.ceil(vcpu / 2.0));
         int maxReplicas = replicas * 2;
 
         var instances = props.getPricing().getInstances();

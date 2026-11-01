@@ -38,11 +38,8 @@ public class RollbackService {
                 return null;
             }
 
-            String previous = gitHub.findPreviousCommitForFile(app.getRepoOwner(), app.getRepoName(), app.getValuesPath(), app.getBranch());
+            String previous = gitHub.findPreviousImageTag(app.getRepoOwner(), app.getRepoName(), app.getValuesPath(), app.getBranch(), badSha);
             if (previous == null) {
-                return null;
-            }
-            if (previous.equals(badSha)) {
                 return null;
             }
 

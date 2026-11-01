@@ -36,6 +36,11 @@ shipmate:
     branch: main
   k8s:
     namespace-prefix: shipmate
+    service-type: ${SHIPMATE_SERVICE_TYPE:LoadBalancer}
+  registry:
+    url: ${SHIPMATE_REGISTRY_URL:ghcr.io}
+    owner: ${SHIPMATE_REGISTRY_OWNER:Mojojojo0222}
+    type: ${SHIPMATE_REGISTRY_TYPE:ghcr}
   pipeline:
     ci-timeout-min: 15
     deploy-timeout-min: 8

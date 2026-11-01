@@ -135,6 +135,37 @@ public class GitHubClient {
         return null;
     }
 
+    public String findPreviousImageTag(String owner, String repo, String path, String branch, String badTag) {
+        try {
+            JsonNode node = exec(authed(url("/repos/" + owner + "/" + repo + "/commits?path=" + path + "&per_page=10&sha=" + branch)).get());
+            if (!node.isArray()) return null;
+            String current = badTag;
+            for (JsonNode c : node) {
+                String sha = c.path("sha").asText();
+                try {
+                    JsonNode file = exec(authed(url("/repos/" + owner + "/" + repo + "/contents/" + path + "?ref=" + sha)).get());
+                    String content = new String(Base64.getMimeDecoder().decode(file.path("content").asText()));
+                    String tag = null;
+                    for (String line : content.split("\n")) {
+                        if (line.trim().startsWith("tag:")) {
+                            tag = line.substring(line.indexOf(":") + 1).trim();
+                            break;
+                        }
+                    }
+                    if (tag != null && !tag.equals(current)) {
+                        return tag;
+                    }
+                    current = tag == null ? current : tag;
+                } catch (IOException e) {
+                    log.warn("skip values read at {}: {}", sha, e.getMessage());
+                }
+            }
+        } catch (IOException e) {
+            log.warn("findPreviousImageTag failed for {}/{}: {}", owner, repo, e.getMessage());
+        }
+        return null;
+    }
+
     public boolean dispatchWorkflow(String owner, String repo, String workflowFile, String ref) {
         try {
             ObjectNode body = mapper.createObjectNode();

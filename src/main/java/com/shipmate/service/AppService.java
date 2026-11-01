@@ -30,10 +30,11 @@ public class AppService {
     private final ManifestGenerator manifestGenerator;
     private final AgentProperties props;
     private final AuditService audit;
+    private final com.shipmate.k8s.K8sService k8s;
 
     public AppService(AppRepository appRepo, DeploymentRunRepository runRepo, GitHubClient gitHub,
                       CostEstimator costEstimator, SpecGenerator specGenerator, ManifestGenerator manifestGenerator,
-                      AgentProperties props, AuditService audit) {
+                      AgentProperties props, AuditService audit, com.shipmate.k8s.K8sService k8s) {
         this.appRepo = appRepo;
         this.runRepo = runRepo;
         this.gitHub = gitHub;
@@ -42,9 +43,11 @@ public class AppService {
         this.manifestGenerator = manifestGenerator;
         this.props = props;
         this.audit = audit;
+        this.k8s = k8s;
     }
 
-    public record RegisterRequest(String repoUrl, int trafficRpm, int trafficUsers, Integer containerPort, String healthPath) {}
+    public record RegisterRequest(String repoUrl, int trafficRpm, int trafficUsers, Integer containerPort,
+                                  String healthPath, String dbEngine) {}
 
     @Transactional
     public App register(RegisterRequest req) {
@@ -74,6 +77,7 @@ public class AppService {
         app.setTrafficRpm(req.trafficRpm());
         app.setTrafficUsers(req.trafficUsers());
         app.setContainerPort(req.containerPort() == null ? 8080 : req.containerPort());
+        app.setDbEngine(req.dbEngine() == null || req.dbEngine().isEmpty() ? "postgres" : req.dbEngine().toLowerCase());
         app.setNamespace(props.getK8s().getNamespacePrefix() + "-" + app.getName());
         app.setWorkflowFile(props.getGithub().getCiWorkflow());
         app.setHealthUrl("http://" + app.getName() + "." + app.getNamespace() + ".svc.cluster.local:"
@@ -110,14 +114,22 @@ public class AppService {
         App app = get(appId);
 
         var helm = manifestGenerator.generateHelmChartWithDb(app, costEstimator.computeSizing(app.getTrafficRpm()));
+        String argoYaml = null;
         try {
             commitFiles(app, helm);
             String argoPath = props.getGitops().getManifestsPath() + "/apps/" + app.getName() + ".yaml";
-            commitFile(app, argoPath, manifestGenerator.generateArgoApp(app));
+            argoYaml = manifestGenerator.generateArgoApp(app);
+            commitFile(app, argoPath, argoYaml);
             String wfPath = ".github/workflows/" + app.getWorkflowFile();
             commitFile(app, wfPath, manifestGenerator.generateCiWorkflow(app));
         } catch (Exception e) {
             throw new IllegalStateException("failed to write manifests to repo: " + e.getMessage(), e);
+        }
+
+        if (argoYaml != null && k8s.applyYaml(argoYaml)) {
+            audit.log("engine", "argocd.application.applied", "app=" + app.getName());
+        } else {
+            throw new IllegalStateException("failed to register app with ArgoCD");
         }
 
         app.setStatus(AppStatus.DEPLOYING);
@@ -172,6 +184,24 @@ public class AppService {
         app.setStatus(AppStatus.PAUSED);
         appRepo.save(app);
         audit.log("user", "app.remove", "app=" + app.getName());
+    }
+
+    public App update(Long id, Map<String, Object> body) {
+        App app = get(id);
+        if (body.containsKey("trafficRpm")) {
+            app.setTrafficRpm(((Number) body.get("trafficRpm")).intValue());
+        }
+        if (body.containsKey("trafficUsers")) {
+            app.setTrafficUsers(((Number) body.get("trafficUsers")).intValue());
+        }
+        if (body.containsKey("healthPath")) {
+            app.setHealthUrl("http://" + app.getName() + "." + app.getNamespace() + ".svc.cluster.local:"
+                    + app.getContainerPort() + body.get("healthPath"));
+        }
+        app.setStatus(AppStatus.ESTIMATED);
+        appRepo.save(app);
+        audit.log("user", "app.update", "app=" + app.getName() + " trafficRpm=" + app.getTrafficRpm());
+        return app;
     }
 
     public static String[] parseRepoUrl(String url) {

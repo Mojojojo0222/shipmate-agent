@@ -15,6 +15,7 @@ public class AgentProperties {
     private Monitor monitor = new Monitor();
     private Aws aws = new Aws();
     private Pricing pricing = new Pricing();
+    private Registry registry = new Registry();
 
     public Github getGithub() { return github; }
     public void setGithub(Github github) { this.github = github; }
@@ -30,6 +31,21 @@ public class AgentProperties {
     public void setAws(Aws aws) { this.aws = aws; }
     public Pricing getPricing() { return pricing; }
     public void setPricing(Pricing pricing) { this.pricing = pricing; }
+    public Registry getRegistry() { return registry; }
+    public void setRegistry(Registry registry) { this.registry = registry; }
+
+    public static class Registry {
+        private String url = "ghcr.io";
+        private String owner = "Mojojojo0222";
+        private String type = "ghcr";
+
+        public String getUrl() { return url; }
+        public void setUrl(String url) { this.url = url; }
+        public String getOwner() { return owner; }
+        public void setOwner(String owner) { this.owner = owner; }
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+    }
 
     public static class Github {
         private String apiUrl = "https://api.github.com";
@@ -80,14 +96,17 @@ public class AgentProperties {
 
     public static class K8s {
         private String namespacePrefix = "shipmate";
+        private String serviceType = "LoadBalancer";
 
         public String getNamespacePrefix() { return namespacePrefix; }
         public void setNamespacePrefix(String namespacePrefix) { this.namespacePrefix = namespacePrefix; }
+        public String getServiceType() { return serviceType; }
+        public void setServiceType(String serviceType) { this.serviceType = serviceType; }
     }
 
     public static class Pipeline {
         private int ciTimeoutMinutes = 15;
-        private int deployTimeoutMinutes = 8;
+        private int deployTimeoutMinutes = 12;
         private int healthRetries = 6;
         private int healthIntervalSeconds = 10;
         private boolean rollbackEnabled = true;
